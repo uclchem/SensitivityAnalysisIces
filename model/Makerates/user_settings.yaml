@@ -1,0 +1,21 @@
+#Your list of all species
+species_file: ../../../Networks/2025-Dijkhuis-ClassicalBarrier/default_species_inertia.csv
+#species_file: data/default/default_species_updatedFormat.csv
+
+#core reactions from gas phase database
+database_reaction_file: data/databases/umist22.csv
+database_reaction_type: UMIST
+#database_reaction_file : data/databases/kida.uva.2014.dat
+#database_reaction_type : KIDA
+
+#set of additional reactions: eg grain network
+custom_reaction_file: ../../../Networks/2025-Dijkhuis-ClassicalBarrier/default_grain_network.csv
+#custom_reaction_file: data/default/default_grain_network_updatedFormat.csv
+custom_reaction_type: UCL
+
+#whether to automatically expand to three phase network
+three_phase: True
+
+# Directory in which to store output. If not included we automatically move
+# the files to the uclchem src folder. This is the default behaviour.
+# output_directory : "outputFiles"
