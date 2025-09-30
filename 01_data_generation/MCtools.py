@@ -2,22 +2,20 @@ import os
 import sys
 import time
 from math import ceil
+from pathlib import Path
 from subprocess import Popen, run
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import uclchem
+from scipy.constants import Boltzmann, atomic_mass, pi
 from scipy.special import erf, erfinv
 from scipy.stats.qmc import LatinHypercube, Sobol
-
-from pathlib import Path
-
-from scipy.constants import Boltzmann, atomic_mass, pi
-from uclchem.makerates.species import Species
-from uclchem.makerates.reaction import Reaction, CoupledReaction
 from uclchem.makerates.network import Network
+from uclchem.makerates.reaction import CoupledReaction
+from uclchem.makerates.species import Species
 
-from typing import Literal
 
 def generate_samples(
     network: list[Network],
@@ -27,7 +25,6 @@ def generate_samples(
     # means: list[float],
     output_path: str | Path | None = None,
 ) -> np.ndarray:
-
     (
         species,
         reactions,
@@ -63,7 +60,6 @@ def generate_samples(
         + barriers_non_coupled
     )
     means = np.array(means)
-
 
     # Use regular Random sampling
     n_parameters = 4 * len(species) + len(reactions)

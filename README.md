@@ -5,7 +5,7 @@ Tobias Dijkhuis, Thanja Lamberts, Serena Viti & Herma Cuppen
 DOI: .........
 
 ### Paper:
-You can find a PDF of the paper [here](00_paper/paper.pdf), or on the A&A website [here (todo)](https://google.com).
+You can find a PDF of the paper [here (todo)](00_paper/paper.pdf), or on the A&A website [here (todo)](https://google.com).
 
 ### BibTex entry:
 ```
@@ -27,10 +27,23 @@ You can find a PDF of the paper [here](00_paper/paper.pdf), or on the A&A websit
 
 ### Data generation
 All the data shown in the paper (and much more) can be generated using the scripts 
-in the [data generation directory](01_data_generation).
+in the [data generation directory](01_data_generation) First, install UCLCHEM.
+
+    cd model
+    pip install -e .
+
+> **Note:** This is a custom version of UCLCHEM, so you need to use the one provided in this repository.
+
+The data can then be generated as such.
+
+    cd 01_data_generation
+    python3 run_sensitivity_analysis.py
 
 ### Data analysis
 Once the data has been generated, it can be analyzed using tools in the [data analysis directory](02_data_analysis).
+
+    cd 02_data_analysis
+    python3 analysis_abundances.py
 
 ### Figures
 All the created figures will be placed [here](03_figures).

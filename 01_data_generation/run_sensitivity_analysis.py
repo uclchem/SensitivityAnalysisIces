@@ -1,35 +1,23 @@
 import os
 import sys
 from multiprocessing import cpu_count
+from pathlib import Path
 
 import numpy as np
-import pandas as pd
 from uclchem.makerates import io_functions
 from uclchem.makerates.makerates import _get_network_from_files
-from uclchem.makerates.network import Network
-from uclchem.makerates.reaction import CoupledReaction, Reaction
-from uclchem.makerates.species import Species
 
 from MCtools import (
     combine_grids,
     create_grid,
-    generateLHS,
-    generateSobol,
-    generateUniform,
+    extract_parameters_from_network,
+    generate_samples,
     get_UCLCHEM_dir,
-    inverseCDFBounded,
     readMCparameters,
     recompile_UCLCHEM,
     run_grid,
     terminate_all_processes,
-    HHprefactor,
-    generate_samples,
-    value_to_std,
-    extract_parameters_from_network
 )
-
-from pathlib import Path
-
 
 if __name__ == "__main__":
     print("Are you sure you want to run the sensitivity analysis? Enter y if so")
@@ -114,9 +102,7 @@ if __name__ == "__main__":
         # Number of samples to test convergence
         n_samples = 2000
         # Where to do the convergence calculations and put the output data
-        output_dir = Path(
-            "data_convergence"
-        )
+        output_dir = Path("data_convergence")
 
         temperatures = [10.0, 50.0]
         densities = [1e3, 1e6]
@@ -174,7 +160,7 @@ if __name__ == "__main__":
 
     if generate_new_samples:
         samples = generate_samples(
-            network = network,
+            network=network,
             n_samples=n_samples,
             output_path=output_dir / "MC_parameters.csv",
         )
