@@ -1,19 +1,26 @@
+from __future__ import annotations
+
 import itertools
 import math
 import os
 import re
 from copy import deepcopy
+from dataclasses import dataclass
 from glob import glob
 from multiprocessing import cpu_count
 from multiprocessing.pool import Pool
+from pathlib import Path
 from random import shuffle
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from IPython.display import display
 from matplotlib import ticker
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.lines import Line2D
 
 # from labellines import labelLine, labelLines
 from scipy import integrate, ndimage, stats
@@ -40,6 +47,1058 @@ GAS_DUST_DENSITY_RATIO = (
 ) / (3.0e0 * atomic_mass)  # Reciprocal of gas-to-dust number density
 SURFACE_SITE_DENSITY = 1.5e15
 NUM_SITES_PER_GRAIN = GRAIN_RADIUS * GRAIN_RADIUS * SURFACE_SITE_DENSITY * 4.0 * pi
+
+
+def set_environ_njobs(njobs: int | str) -> None:
+    os.environ["OMP_NUM_THREADS"] = str(njobs)
+    os.environ["OPENBLAS_NUM_THREADS"] = str(njobs)
+    os.environ["MKL_NUM_THREADS"] = str(njobs)
+    os.environ["VECLIB_NUM_THREADS"] = str(njobs)
+    os.environ["NUMEXPR_NUM_THREADS"] = str(njobs)
+
+
+@dataclass
+class Style:
+    zero_correlation_ls = "dashed"
+    zero_correlation_lw = 1.0
+    zero_correlation_color = "gray"
+    zero_correlation_alpha = 0.6
+
+    weak_correlation_color = "gray"
+    weak_correlation_alpha = 0.15
+
+    nominal_color = "#FDB366"
+    nominal_ls = "dashed"
+    average_color = "#60BCE9"
+    average_ls = "solid"
+    sample_color = "black"
+    sample_lw = 0.2
+    sample_alpha = 0.1
+
+    min_statistic = 0.4
+    correlation_ci_alpha = 0.25
+    correlation_ci_edgecolor = "face"
+    correlation_ci_lw = 0.15
+    sampling_95_ci = 0.08
+
+    ylim = [1e-16, 1e-2]
+    xlim = [1e0, 1e6]
+
+    marker_edgelinewidth = 0.1
+    marker_edgecolor = "black"
+    abundance_marker_size = 12
+    abundance_marker_alpha = 0.75
+    nominal_marker_size = 50
+
+    abundance_label = "Abundance (wrt H)"
+    time_label = "Time (years)"
+    temperature_label = "Temperature (K)"
+    rRIN_label = "$r_{\mathrm{RIN}}$"
+
+    title_pad = 3.5
+
+
+def set_rc_params(font: str = "AA") -> None:
+    font = font.lower()
+    if font not in ["aa", "cmu_bright"]:
+        raise ValueError()
+
+    plt.style.use("style.mplstyle")
+
+    if font == "cmu_bright":
+        mpl.rcParams["font.family"] = "sans-serif"
+        mpl.rcParams["font.sans-serif"] = "CMU Bright"
+        mpl.rcParams["axes.unicode_minus"] = False
+        mpl.rcParams["text.usetex"] = False
+
+        # The "\usepackage[OT1]{fontenc}" ensures that we do not use oldstyle numbers, which
+        # does not look great imo.
+        mpl.rcParams["text.latex.preamble"] = (
+            r"\usepackage{cmbright}\n\usepackage[OT1]{fontenc}"
+        )
+        mpl.rcParams["mathtext.fontset"] = "custom"
+        mpl.rcParams["mathtext.cal"] = "sans:italic"
+        mpl.rcParams["mathtext.default"] = "it"
+        mpl.rcParams["pdf.fonttype"] = 42
+
+
+class DataManager:
+    def __init__(
+        self, directory: str | Path, style: Style | None = None, njobs: int = 1
+    ):
+        self.directory = Path(directory)
+        if not self.directory.is_dir():
+            raise ValueError()
+        self.parameters_path = self.directory / "MC_parameter_runs.csv"
+
+        parametersDF = pd.read_csv(self.parameters_path, index_col=0)
+        self.parameters = parametersDF.to_numpy()
+        self.parameter_names = parametersDF.columns.to_numpy()
+        self.parameters_RIN = rankInverseNormalTransform(self.parameters)
+
+        # Get filepaths of all model runs
+        self.filepaths_samples, self.filepaths_nominal = getAllRunsFilepaths(
+            self.directory, extension="h5"
+        )
+
+        # Get all sets of physical conditions
+        self.physical_conditions = getPhysicalParamSets(
+            [filepaths[0] for filepaths in self.filepaths_samples]
+        )
+
+        if style is None:
+            style = Style()
+        self.style = style
+        self.njobs = njobs
+
+    def get_total_runtime(self) -> float:
+        return getTotalRuntime(list(itertools.chain(*self.filepaths_samples)))
+
+    def get_physical_conditions_index(
+        self, T: float, nH: float, zeta: float, radfield: float
+    ) -> int:
+        if T is None or nH is None or zeta is None or radfield is None:
+            raise ValueError()
+        return physicalParamSetToIndex(
+            self.physical_conditions, T=T, nH=nH, zeta=zeta, radfield=radfield
+        )
+
+    def get_dataframes(
+        self,
+        T: float = None,
+        nH: float = None,
+        zeta: float = None,
+        radfield: float = None,
+    ) -> Models:
+        index = self.get_physical_conditions_index(T, nH, zeta, radfield)
+
+        # Get filepaths of all model runs at this certain set of physical conditions
+        sampleDFs, nominalDF = getDataFramesForPhysicalParamSet(
+            index, self.filepaths_samples, self.filepaths_nominal, njobs=self.njobs
+        )
+        return Models(sampleDFs, nominalDF)
+
+    def get_parameter_values(self, parameter_name: str, get_RIN: bool = False):
+        index = np.nonzero(self.parameter_names == parameter_name)[0]
+        if get_RIN:
+            return self.parameters_RIN[:, index]
+        else:
+            return self.parameters[:, index]
+
+    def create_standard_plot(
+        self,
+        T: float,
+        nH: float,
+        zeta: float,
+        radfield: float,
+        species: list[str],
+        times=np.logspace(0, 6, num=100),
+        on_grain: bool = False,
+        save_fig_path: str | Path | None = None,
+        plot_individual_samples: bool = True,
+        colors: list[str] | None = None,
+        put_legend_on_side: bool = False,
+    ) -> None:
+        models = self.get_dataframes(T=T, nH=nH, zeta=zeta, radfield=radfield)
+        models = models.get_models_that_reach_desired_time(times[-1])
+        models.set_times(times)
+        models.create_standard_plot(
+            species,
+            self.parameters_RIN,
+            self.parameter_names,
+            on_grain=on_grain,
+            njobs=self.njobs,
+            save_fig_path=save_fig_path,
+            style=self.style,
+            plot_individual_samples=plot_individual_samples,
+            colors=colors,
+            put_legend_on_side=put_legend_on_side,
+        )
+
+    def create_big_plot(
+        self,
+        temps: list[float],
+        densities: list[float],
+        zeta: float,
+        radfield: float,
+        species: list[str],
+        times=np.logspace(0, 6, num=100),
+        on_grain: bool = False,
+        save_fig_path: str | Path | None = None,
+        plot_individual_samples: bool = True,
+        colors: list[str] | None = None,
+    ) -> None:
+        if colors is None:
+            colors = getColors()
+        # suptitle_h_loc = 0.55
+
+        fig = plt.figure(figsize=(8, 8))
+        outer_gs = fig.add_gridspec(len(temps), len(densities))
+        seenSpeciesParameters = []
+
+        axsStorage = np.empty(
+            shape=(len(temps), len(densities), 2, len(species)), dtype=object
+        )
+        suplabels = []
+        for i, temp in enumerate(temps):
+            for j, density in enumerate(densities):
+                seenParameters = []
+                log10Density = int(np.log10(density))
+                title = f"$T={int(temp)}$ K, $n_{{\mathrm{{H}}}}=10^{{{log10Density}}}$ cm$^{{-3}}$"
+                subfig = fig.add_subfigure(outer_gs[i, j])
+                subfig.suptitle(title, y=0.98, fontsize=12)
+                gs = subfig.add_gridspec(
+                    nrows=2,
+                    ncols=len(species),
+                    wspace=0,
+                    hspace=0,
+                    height_ratios=(1.0, 2.0 / 3.0),
+                )
+                gs.update(left=0.05, bottom=0.13, top=0.91)
+
+                axs = np.empty(shape=(2, len(species)), dtype=object)
+                for k, spec in enumerate(species):
+                    if k == 0:
+                        axs[0, k] = subfig.add_subplot(gs[0, k])
+                        axs[1, k] = subfig.add_subplot(gs[1, k], sharex=axs[0, k])
+                    else:
+                        axs[0, k] = subfig.add_subplot(gs[0, k], sharey=axs[0, 0])
+                        axs[1, k] = subfig.add_subplot(
+                            gs[1, k], sharey=axs[1, 0], sharex=axs[0, k]
+                        )
+                    axs[0, k].label_outer()
+                    axs[1, k].label_outer()
+                    axs[0, k].set_xscale("log")
+                    axs[0, k].set_xlim(self.style.xlim)
+                    axs[0, k].set_ylim(self.style.ylim)
+                    axs[0, k].set_yscale("log")
+                    axs[0, k].set_title(
+                        convertSpeciesToLegendLabel(spec),
+                        y=0.80,
+                    )
+
+                    axs[1, k].set_ylim([-1.2, 1.2])
+                    axs[1, k].axhline(
+                        0,
+                        c=self.style.zero_correlation_color,
+                        alpha=self.style.zero_correlation_alpha,
+                        ls=self.style.zero_correlation_ls,
+                        lw=self.style.zero_correlation_lw,
+                    )
+                    axs[1, k].fill_between(
+                        [0, 1e10],
+                        [-self.style.min_statistic] * 2,
+                        [self.style.min_statistic] * 2,
+                        color=self.style.weak_correlation_color,
+                        alpha=self.style.weak_correlation_alpha,
+                        edgecolor="none",
+                    )
+                axs[0, 0].set_ylabel(self.style.abundance_label)
+                axs[1, 0].set_ylabel(self.style.rRIN_label)
+
+                suplabel = subfig.supxlabel(
+                    self.style.time_label
+                )  # , x=suptitle_h_loc, y=-0.015)
+                suplabels.append(suplabel)
+
+                axs[0, 0].set_xticks([1e0, 1e2, 1e4, 1e6])
+                [axs[0, l].set_xticks([1e2, 1e4, 1e6]) for l in range(1, len(species))]
+                [
+                    axs[0, l].set_xticks([1e1, 1e3, 1e5], ["", "", ""], minor=True)
+                    for l in range(len(species))
+                ]
+                axsStorage[i, j, :, :] = axs
+
+                models = self.get_dataframes(
+                    T=temp, nH=density, zeta=zeta, radfield=radfield
+                )
+                models = models.get_models_that_reach_desired_time(times[-1])
+                models.set_times(times)
+
+                for k, spec in enumerate(species):
+                    # Lightly plot all model runs
+                    models.plot_abundances_panel(
+                        spec,
+                        axs[0, k],
+                        on_grain=on_grain,
+                        plot_individual_samples=plot_individual_samples,
+                        njobs=self.njobs,
+                        style=self.style,
+                    )
+
+                    abundances_RIN = models.get_abundances_RIN(
+                        spec, on_grain=on_grain, njobs=self.njobs
+                    )
+
+                    # Perform rank-based inverse normal transformation on the abundances
+                    sigCorrelations = calculateSignificantCorrelations2D(
+                        abundances_RIN,
+                        self.parameters_RIN,
+                        self.parameter_names,
+                        confidence_level=0.95,
+                        minStatistic=self.style.min_statistic,
+                        calculate_confidence_interval=True,
+                    )
+
+                    if sigCorrelations is None:
+                        # If there are no strong enough correlations, go to next species
+                        continue
+
+                    # For all significant and strong correlations, plot them.
+                    for l, row in sigCorrelations.iterrows():
+                        plot_kwargs = {}
+                        if row["parameter"] not in seenParameters:
+                            seenParameters.append(row["parameter"])
+                            plot_kwargs["label"] = convertParameterNameToLegendLabel(
+                                row["parameter"]
+                            )
+
+                        paramType = get_param_type_from_param(row["parameter"])
+                        linestyle = get_linestyle_from_param_type(paramType)
+                        speciesParameter = get_species_from_param(row["parameter"])
+
+                        if speciesParameter not in seenSpeciesParameters:
+                            seenSpeciesParameters.append(speciesParameter)
+                        colorIndex = (
+                            seenSpeciesParameters.index(speciesParameter)
+                        ) % len(colors)
+
+                        axs[1, k].plot(
+                            models.times,
+                            row["statistic"],
+                            c=colors[colorIndex],
+                            ls=linestyle,
+                            **plot_kwargs,
+                        )
+
+                        axs[1, k].fill_between(
+                            models.times,
+                            np.array(row["cilow"]) - self.style.sampling_95_ci,
+                            np.array(row["cihigh"]) + self.style.sampling_95_ci,
+                            alpha=self.style.correlation_ci_alpha,
+                            color=colors[colorIndex],
+                            edgecolor=self.style.correlation_ci_edgecolor,
+                            linewidth=self.style.correlation_ci_lw,
+                        )
+
+        legendHandles = [
+            Line2D([0], [0], c=colors[(i) % len(colors)])
+            for i in range(len(seenSpeciesParameters))
+        ]
+        leg = axsStorage[0, 0, 0, 0].legend(
+            legendHandles,
+            [i for i in seenSpeciesParameters],
+            loc="center left",
+            bbox_to_anchor=(0.0, 1.27),
+            handlelength=0,
+            labelcolor="linecolor",
+            handletextpad=0,
+            labelspacing=0.4,
+            columnspacing=1.5,
+            ncols=6,
+        )
+
+        [handle.set_visible(False) for handle in leg.legend_handles]
+        axsStorage[0, 0, 0, 0].add_artist(leg)
+        leg.set_in_layout(False)
+
+        paramTypesLegend = [
+            r"$E_{\mathrm{diff}}$",
+            r"$\nu_{\mathrm{diff}}$",
+            r"$E_{\mathrm{bind}}$",
+            r"$\nu_{\mathrm{des}}$",
+            r"$E_{\mathrm{reac}}$",
+        ]
+        ls = ["solid", "dashdot", "dashed", "dotted", (0, (5, 1))]
+        paramtypeHandles = [Line2D([0], [0], ls=ls[i], c="k") for i in range(5)]
+        leg2 = axsStorage[0, 1, 0, 0].legend(
+            paramtypeHandles,
+            paramTypesLegend,
+            loc="center left",
+            ncols=3,
+            bbox_to_anchor=(0.0, 1.27),
+        )
+        axsStorage[0, 1, 0, 0].add_artist(leg2)
+        leg2.set_in_layout(False)
+
+        if save_fig_path is None:
+            plt.show()
+        else:
+            plt.savefig(save_fig_path, bbox_extra_artists=[leg, leg2, *suplabels])
+
+    def create_standard_plots_for_all_physical_conditions(
+        self,
+        species,
+        times=np.logspace(0, 6, 100),
+        on_grain: bool = False,
+        prefix: str = "sensitivities_",
+        postfix=".pdf",
+        filter_zeta: list[float] | float | None = None,
+        filter_radfield: list[float] | float | None = None,
+    ) -> None:
+        mpl.use("agg")
+        for physical_condition in self.physical_conditions:
+            if filter_zeta is not None:
+                if isinstance(filter_zeta, float):
+                    if physical_condition[2] != filter_zeta:
+                        continue
+                else:
+                    if physical_condition[2] not in filter_zeta:
+                        continue
+            if filter_radfield is not None:
+                if isinstance(filter_radfield, float):
+                    if physical_condition[3] != filter_radfield:
+                        continue
+                else:
+                    if physical_condition[3] not in filter_radfield:
+                        continue
+
+            physical_condition_string = physicalParamSetToSaveString(physical_condition)
+            path = f"{prefix}{physical_condition_string}{postfix}"
+            self.create_standard_plot(
+                *physical_condition,
+                species,
+                times=times,
+                on_grain=on_grain,
+                save_fig_path=path,
+            )
+            plt.close()
+
+    def plot_abundances_against_parameter(
+        self,
+        T: float,
+        nH: float,
+        zeta: float,
+        radfield: float,
+        species: list[str],
+        parameter_name: str,
+        times: list[float] | float,
+        on_grain: bool = False,
+        save_fig_path: str | Path | None = None,
+    ) -> None:
+        models = self.get_dataframes(
+            T=T,
+            nH=nH,
+            zeta=zeta,
+            radfield=radfield,
+        )
+        if isinstance(times, float):
+            times = [times]
+        models = models.get_models_that_reach_desired_time(times[-1])
+        models.set_times(times)
+        parameter_values = self.get_parameter_values(parameter_name, get_RIN=False)
+        parameter_RIN = self.get_parameter_values(parameter_name, get_RIN=True)
+        models.plot_abundances_against_parameter(
+            species,
+            parameter_values,
+            parameter_RIN,
+            parameter_name,
+            on_grain=on_grain,
+            njobs=self.njobs,
+            save_fig_path=save_fig_path,
+            style=self.style,
+        )
+
+    def create_widths_plot(
+        self,
+        temps: list[float],
+        densities: list[float],
+        zeta: float,
+        radfield: float,
+        species: list[str],
+        confidence_level: float = 0.6827,
+        times: list[float] = np.logspace(0, 6, num=100),
+        on_grain: bool = False,
+        save_fig_path: str | Path | None = None,
+    ) -> None:
+        fig, axs = plt.subplots(
+            1,
+            len(species),
+            figsize=(5, 2.598425197),
+            sharex=False,
+            sharey=True,
+        )
+        widths_at_densities = np.zeros((len(species), len(densities), len(times)))
+
+        temp_diff = temps[1] - temps[0]
+        color_bounds = [temp - 0.5 * temp_diff for temp in temps] + [
+            temps[-1] + 0.5 * temp_diff
+        ]
+
+        temp_colors = sns.color_palette("flare_r", as_cmap=True)
+        norm = mpl.colors.BoundaryNorm(color_bounds, temp_colors.N)
+        sm = plt.cm.ScalarMappable(norm=norm, cmap=temp_colors)
+
+        for k, temp in enumerate(temps):
+            for j, density in enumerate(densities):
+                models = self.get_dataframes(
+                    T=temp,
+                    nH=density,
+                    zeta=zeta,
+                    radfield=radfield,
+                )
+                models.get_models_that_reach_desired_time(times[-1])
+                models.set_times(times)
+                times = models.times
+
+                for i, spec in enumerate(species):
+                    cilow, cihigh = models.get_confidence_interval_of_abundances(
+                        spec,
+                        confidence_level=confidence_level,
+                        on_grain=on_grain,
+                        njobs=self.njobs,
+                    )
+                    width = cihigh / cilow
+                    widths_at_densities[i, j, : len(width)] = width
+
+            for i, spec in enumerate(species):
+                averageWidthOverDensities = np.power(
+                    10,
+                    np.average(
+                        np.log10(widths_at_densities[i, :, : len(width)]), axis=0
+                    ),
+                )
+                axs[i].plot(
+                    times,
+                    averageWidthOverDensities,
+                    c=temp_colors(k * 1.0 / len(temps)),
+                    zorder=2,
+                )
+
+        for i, spec in enumerate(species):
+            axs[i].set_title(
+                convertSpeciesToLegendLabel(spec), pad=self.style.title_pad
+            )
+
+            # Draw line at 2 orders of magnitude.
+            axs[i].axhline(
+                1e2,
+                zorder=1,
+                c=self.style.zero_correlation_color,
+                ls=self.style.zero_correlation_ls,
+                alpha=self.style.zero_correlation_alpha,
+                lw=self.style.zero_correlation_lw,
+            )
+
+        fig.supxlabel(self.style.time_label)
+        for ax in axs.flat:
+            ax.set_xlim([1e0, 1e6])
+            ax.set_xscale("log")
+            ax.label_outer()
+        # Set xticks
+        axs[0].set_xticks([1e0, 1e2, 1e4, 1e6])
+        [axs[i].set_xticks([1e2, 1e4, 1e6]) for i in range(1, len(species))]
+        [
+            axs[i].set_xticks([1e1, 1e3, 1e5], ["", "", ""], minor=True)
+            for i in range(len(species))
+        ]
+
+        # Set bottom of plot to 1
+        axs[0].set_ylim(bottom=1e0)
+        axs[0].set_yscale("log")
+        axs[0].set_ylabel(f"Width of {confidence_level * 100}\% confidence interval")
+
+        plt.subplots_adjust(wspace=0, bottom=0.13, right=0.81)
+        cbar_ax = fig.add_axes([0.83, 0.13, 0.025, 0.75])
+        cb = fig.colorbar(sm, ticks=temps, cax=cbar_ax)
+        cb.ax.tick_params(axis="y", direction="out")
+        cb.ax.minorticks_off()
+        cb.set_label(self.style.temperature_label)
+
+        if save_fig_path is not None:
+            plt.savefig(save_fig_path)
+        else:
+            plt.show()
+        # plt.close()
+
+
+class Models:
+    def __init__(
+        self,
+        sample_dfs: list[pd.DataFrame],
+        nominal_df: pd.DataFrame,
+        times: np.ndarray | None = None,
+    ):
+        self.sample_dfs = sample_dfs
+        self.nominal_df = nominal_df
+        self.nsamples = len(self.sample_dfs)
+
+        self.abundances = {}
+
+        if times is None:
+            self.times = None
+            return
+
+        self.set_times(times)
+
+    def set_times(self, times: list[float] | float) -> None:
+        if isinstance(times, int):
+            times = float(times)
+        if isinstance(times, float):
+            times = [times]
+
+        self.sample_time_indeces = getTimeIndices(self.sample_dfs, times)
+        self.nominal_time_indeces = getTimeIndices([self.nominal_df], times)
+
+        # Also get the times that those indices correspond to, such that we can plot them later.
+        timeArray = getTimeFromIndices(self.sample_dfs, self.sample_time_indeces)
+
+        self.sample_time_indeces, timeArray = checkTimeIndices(
+            self.sample_dfs, timeArray, self.sample_time_indeces, times
+        )
+        self.times = timeArray[0, :]
+
+    def get_abundances(
+        self,
+        spec: str,
+        on_grain: bool = False,
+        njobs: int = 1,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        spec_key = self.spec_name_to_abundances_key(spec, on_grain)
+
+        if spec_key not in self.abundances:
+            sample_abundances = getAbundances(
+                self.sample_dfs,
+                self.sample_time_indeces,
+                spec=spec,
+                on_grain=on_grain,
+                njobs=njobs,
+            )
+            nominal_abundances = getAbundance(
+                self.nominal_df,
+                range(len(self.nominal_df.index)),
+                spec=spec,
+                on_grain=on_grain,
+            )
+            self.abundances[spec_key] = (sample_abundances, nominal_abundances)
+
+        return self.abundances[spec_key]
+
+    def get_abundances_RIN(
+        self,
+        spec: str,
+        on_grain: bool = False,
+        njobs: int = 1,
+    ):
+        samples, _ = self.get_abundances(spec, njobs=njobs, on_grain=on_grain)
+        return rankInverseNormalTransform(samples)
+
+    def spec_name_to_abundances_key(self, spec: str, on_grain: bool) -> str:
+        if on_grain:
+            return spec + "_ice"
+        else:
+            return spec + "_gas"
+
+    def get_models_that_reach_desired_time(self, desired_time: float) -> Models:
+        return Models(
+            [
+                sample_df
+                for sample_df in self.sample_dfs
+                if sample_df["Time"].iloc[-1] >= desired_time
+            ],
+            self.nominal_df,
+            times=self.times,
+        )
+
+    def get_log_average_abundance(
+        self, spec, on_grain: bool = False, njobs: int = 1
+    ) -> np.ndarray:
+        samples, _ = self.get_abundances(spec, on_grain=on_grain, njobs=njobs)
+        return np.power(10, np.average(np.log10(samples), axis=0))
+
+    def get_median_abundance(
+        self, spec, on_grain: bool = False, njobs: int = 1
+    ) -> np.ndarray:
+        samples, _ = self.get_abundances(spec, on_grain=on_grain, njobs=njobs)
+        return np.median(samples, axis=0)
+
+    def get_confidence_interval_of_abundances(
+        self,
+        spec,
+        confidence_level: float = 0.6827,
+        on_grain: bool = False,
+        njobs: int = 1,
+    ):
+        samples, _ = self.get_abundances(spec, on_grain=on_grain, njobs=njobs)
+        cilow = np.quantile(samples, (1.0 - confidence_level) / 2.0, axis=0)
+        cihigh = np.quantile(samples, (1.0 + confidence_level) / 2.0, axis=0)
+        return cilow, cihigh
+
+    def create_standard_plot(
+        self,
+        species: list[str],
+        parameters_RIN: np.ndarray,
+        parameter_names: list[str],
+        on_grain: bool = False,
+        njobs: int = 1,
+        plot_individual_samples: bool = True,
+        # do_RIN: bool = True,
+        save_fig_path: str | Path | None = None,
+        colors: list[str] | None = None,
+        style: Style | None = None,
+        put_legend_on_side: bool = False,
+    ) -> None:
+        seen_parameters = []
+        lines = []
+        fills = []
+        seenSpeciesParameters = []
+
+        if colors is None:
+            colors = getColors()
+        if style is None:
+            style = Style()
+        fig, axs = plt.subplots(
+            2,
+            len(species),
+            sharey="row",
+            sharex="col",
+            figsize=(4.5, 3),
+            height_ratios=(1.0, 2.0 / 3.0),
+        )
+        if len(species) == 1:
+            axs = np.reshape(axs, (2, -1))
+
+        for spec_idx, spec in enumerate(species):
+            axs[0, spec_idx].set_title(
+                convertSpeciesToLegendLabel(spec), pad=style.title_pad
+            )
+            self.plot_abundances_panel(
+                spec,
+                axs[0, spec_idx],
+                on_grain=on_grain,
+                njobs=njobs,
+                plot_individual_samples=plot_individual_samples,
+                style=style,
+            )
+
+            axs[1, spec_idx].axhline(
+                0,
+                color=style.zero_correlation_color,
+                linestyle=style.zero_correlation_ls,
+                lw=style.zero_correlation_lw,
+                alpha=style.zero_correlation_alpha,
+                zorder=0,
+            )
+            axs[1, spec_idx].fill_between(
+                [0, 1e10],
+                [-style.min_statistic] * 2,
+                [style.min_statistic] * 2,
+                color=style.weak_correlation_color,
+                alpha=style.weak_correlation_alpha,
+                edgecolor="none",
+                zorder=0,
+            )
+
+            samples_RIN = self.get_abundances_RIN(spec, on_grain=on_grain, njobs=njobs)
+            sigCorrelations = calculateSignificantCorrelations2D(
+                samples_RIN,
+                parameters_RIN,
+                parameter_names,
+                confidence_level=0.95,
+                minStatistic=style.min_statistic,
+            )
+
+            if sigCorrelations is None:
+                # If there are no strong enough correlations, go to next species
+                continue
+
+            # For all significant and strong correlations, plot them.
+            for j, row in sigCorrelations.iterrows():
+                plot_kwargs = {}
+                if row["parameter"] not in seen_parameters:
+                    seen_parameters.append(row["parameter"])
+                    plot_kwargs["label"] = convertParameterNameToLegendLabel(
+                        row["parameter"]
+                    )
+
+                paramType = get_param_type_from_param(row["parameter"])
+                linestyle = get_linestyle_from_param_type(paramType)
+                speciesParameter = get_species_from_param(row["parameter"])
+
+                if speciesParameter not in seenSpeciesParameters:
+                    seenSpeciesParameters.append(speciesParameter)
+                colorIndex = (seenSpeciesParameters.index(speciesParameter)) % len(
+                    colors
+                )
+
+                lines.append(
+                    axs[1, spec_idx].plot(
+                        self.times,
+                        row["statistic"],
+                        c=colors[colorIndex],
+                        ls=linestyle,
+                        **plot_kwargs,
+                    )
+                )
+
+                fills.append(
+                    axs[1, spec_idx].fill_between(
+                        self.times,
+                        np.array(row["cilow"]) - style.sampling_95_ci,
+                        np.array(row["cihigh"]) + style.sampling_95_ci,
+                        color=colors[colorIndex],
+                        alpha=style.correlation_ci_alpha,
+                        linewidth=style.correlation_ci_lw,
+                        edgecolor=style.correlation_ci_edgecolor,
+                    )
+                )
+            if not put_legend_on_side:
+                leg = axs[1, spec_idx].legend(
+                    handlelength=0,
+                    handletextpad=0,
+                    labelcolor="linecolor",
+                    loc="lower left",
+                    labelspacing=0.1,
+                    borderaxespad=0.3,
+                )
+                [handle.set_visible(False) for handle in leg.legend_handles]
+
+        for ax in axs.flat:
+            ax.set_xlim(style.xlim)
+            ax.set_xscale("log")
+            ax.label_outer()
+
+        axs[0, 0].set_ylim(style.ylim)
+        axs[0, 0].set_yscale("log")
+        axs[1, 0].set_ylim([-1.2, 1.2])
+        axs[1, 0].set_yticks([-1, 0, 1])
+        axs[0, 0].set_ylabel(style.abundance_label)
+        axs[1, 0].set_ylabel(style.rRIN_label)
+
+        if len(species) == 5:
+            fig.supxlabel(style.time_label, x=0.525)
+        elif len(species) == 4:
+            fig.supxlabel(style.time_label)
+        else:
+            fig.supxlabel(style.time_label)
+
+        # Set xticks
+        axs[0, 0].set_xticks([1e0, 1e2, 1e4, 1e6])
+        [axs[0, i].set_xticks([1e2, 1e4, 1e6]) for i in range(1, len(species))]
+        [
+            axs[0, i].set_xticks([1e1, 1e3, 1e5], ["", "", ""], minor=True)
+            for i in range(len(species))
+        ]
+
+        plt.subplots_adjust(hspace=0, wspace=0, bottom=0.117, left=0.15, top=0.98)
+
+        if put_legend_on_side:
+            handles = [(line[0], fill) for line, fill in zip(lines, fills)]
+            labels = [line[0].get_label() for line in lines]
+            valid_idxs = [
+                i for i, label in enumerate(labels) if not label.startswith("_")
+            ]
+            labels = [label for i, label in enumerate(labels) if i in valid_idxs]
+            handles = [handle for i, handle in enumerate(handles) if i in valid_idxs]
+            leg = axs[1, -1].legend(
+                handles, labels, bbox_to_anchor=(1.0, 0.5), loc="center left"
+            )
+
+        if save_fig_path is not None:
+            if not "." in save_fig_path:
+                save_fig_path += ".pdf"
+            plt.savefig(save_fig_path)
+        else:
+            plt.show()
+        # plt.close()
+
+    def plot_abundances_against_parameter(
+        self,
+        species: list[str],
+        parameter_values: np.ndarray,
+        parameter_RIN: np.ndarray,
+        parameter_name: str,
+        on_grain: bool = False,
+        njobs: int = 1,
+        save_fig_path: str | Path | None = None,
+        style: Style | None = None,
+    ) -> None:
+        if style is None:
+            style = Style()
+        fig, axs = plt.subplots(
+            1,
+            len(species),
+            sharey=True,
+            sharex=True,
+            figsize=(5.0, 2.598425197),
+        )
+        if len(species) == 1:
+            axs = [axs]
+
+        avg_param = np.average(parameter_values)
+        for spec_idx, spec in enumerate(species):
+            axs[spec_idx].set_title(
+                convertSpeciesToLegendLabel(spec), pad=style.title_pad
+            )
+            samples, nominal = self.get_abundances(spec, on_grain=on_grain, njobs=njobs)
+            samples_RIN = self.get_abundances_RIN(spec, on_grain=on_grain, njobs=njobs)
+
+            allCorrelations = calculateAllCorrelations2D(
+                samples_RIN,
+                parameter_RIN,
+                [parameter_name],
+                confidence_level=0.95,
+                calculateConfidenceInterval=True,
+            )
+
+            if len(self.times) > 1:
+                for time_idx, time in enumerate(self.times):
+                    # TODO: Fix.
+                    axs[spec_idx].scatter(
+                        parameter_values,
+                        samples,
+                        c="orange",  # TODO: Change
+                        edgecolor="none",
+                        marker=".",
+                        s=style.abundance_marker_size,
+                        alpha=style.abundance_marker_alpha,
+                    )
+                    axs[spec_idx].scatter(avg_param, nominal)
+            else:
+                log_avg = self.get_log_average_abundance(
+                    spec, on_grain=on_grain, njobs=njobs
+                )
+                axs[spec_idx].scatter(
+                    parameter_values,
+                    samples,
+                    c="k",
+                    edgecolor="none",
+                    marker=".",
+                    alpha=style.abundance_marker_alpha,
+                    s=style.abundance_marker_size,
+                )
+                axs[spec_idx].scatter(
+                    avg_param,
+                    nominal[self.nominal_time_indeces[0]],
+                    c=style.nominal_color,
+                    marker="X",
+                    edgecolor=style.marker_edgecolor,
+                    linewidth=style.marker_edgelinewidth,
+                    s=style.nominal_marker_size,
+                )
+                text_rRIN = f"${{{allCorrelations['statistic'].iloc[0][0]:.2f}}}\pm{{{allCorrelations['cidiffdown'].iloc[0][0] + style.sampling_95_ci:.2f}}}$"
+                axs[spec_idx].text(
+                    0.5,
+                    0.05,
+                    text_rRIN,
+                    ha="center",
+                    va="bottom",
+                    transform=axs[spec_idx].transAxes,
+                )
+                # axs[spec_idx].axhline(log_avg, c=style.average_color, alpha=1.0)
+                # axs[spec_idx].scatter(
+                #     avg_param,
+                #     log_avg,
+                #     c=style.average_color,
+                #     marker="P",
+                #     edgecolor=style.marker_edgecolor,
+                #     linewidth=style.marker_edgelinewidth,
+                #     s=style.nominal_marker_size,
+                # )
+        axs[0].set_yscale("log")
+        if "prefac" in parameter_name:
+            axs[0].set_xscale("log")
+
+        axs[0].set_ylim(style.ylim)
+        axs[0].set_ylabel(style.abundance_label)
+        xlabel = fig.supxlabel(convertParameterNameToAxisLabel(parameter_name))
+        xlabel.set_in_layout(True)
+
+        plt.subplots_adjust(wspace=0, bottom=0.14)
+
+        if save_fig_path is None:
+            plt.show()
+        else:
+            plt.savefig(save_fig_path)
+
+    def plot_abundances_panel(
+        self,
+        spec: str,
+        ax: plt.Axes,
+        on_grain: bool = False,
+        plot_individual_samples: bool = True,
+        njobs: int = 1,
+        style: Style | None = None,
+    ) -> None:
+        if style is None:
+            style = Style()
+        samples, nominal = self.get_abundances(spec, njobs=njobs, on_grain=on_grain)
+
+        ax.plot(
+            self.nominal_df["Time"],
+            nominal,
+            c=style.nominal_color,
+            ls=style.nominal_ls,
+            zorder=2.0,
+        )
+
+        log_avg = self.get_log_average_abundance(spec, on_grain=on_grain, njobs=njobs)
+        if plot_individual_samples:
+            nsamples = np.shape(samples)[0]
+            for sample_idx in range(nsamples):
+                ax.plot(
+                    self.times,
+                    samples[sample_idx, :],
+                    c=style.sample_color,
+                    lw=style.sample_lw,
+                    alpha=style.sample_alpha,
+                    zorder=1.99,
+                )
+            log_avg_color = style.average_color
+        else:
+            for confidence_level in [0.6827, 0.9545, 1.0]:
+                cilow, cihigh = self.get_confidence_interval_of_abundances(
+                    spec,
+                    confidence_level=confidence_level,
+                    on_grain=on_grain,
+                    njobs=njobs,
+                )
+                ax.fill_between(
+                    self.times,
+                    cilow,
+                    cihigh,
+                    color=style.sample_color,
+                    alpha=0.18,
+                    edgecolor="none",
+                )
+            log_avg_color = style.sample_color
+        ax.plot(self.times, log_avg, c=log_avg_color, ls=style.average_ls)
+
+
+paramTypesLinestyle = {
+    "diff": "solid",
+    "diffprefac": "dashdot",
+    "bind": "dashed",
+    "desprefac": "dotted",
+    "LH": (0, (5, 1)),
+}
+
+
+def get_param_type_from_param(parameter: str) -> str:
+    if "LH" in parameter:
+        return "LH"
+    else:
+        parameter_type = parameter.split()[1]
+        if not parameter_type in paramTypesLinestyle:
+            raise ValueError()
+        return parameter_type
+
+
+def get_linestyle_from_param_type(parameter_type: str) -> str:
+    return paramTypesLinestyle[parameter_type]
+
+
+def get_linestyle_from_param(parameter: str) -> str:
+    param_type = get_parameter_type_from_parameter(parameter)
+    return paramTypesLinestyle[param_type]
+
+
+def get_species_from_param(parameter: str) -> str:
+    param_type = get_param_type_from_param(parameter)
+    if param_type == "LH":
+        return convertParameterNameToLegendLabel(parameter)
+    else:
+        return convertSpeciesToLegendLabel(parameter.split()[0])
 
 
 def getDiscreteRainbowColors(ncolors: int, omit_yellow: bool = True) -> list[str]:
@@ -267,6 +1326,18 @@ def calculateHHprefactor(spec: pd.Series, surfaceSiteDensity: float = 1.5e15) ->
         * (spec["BINDING ENERGY"] * k)
         * 1e4
         / (pi * pi * spec["MASS"] * atomic_mass)
+    )
+
+
+def calculateHHprefactorFromValues(
+    bindingEnergy, mass, surfaceSiteDensity: float = 1.5e15
+) -> float:
+    return np.sqrt(
+        2.0
+        * surfaceSiteDensity
+        * (bindingEnergy * k)
+        * 1e4
+        / (pi * pi * mass * atomic_mass)
     )
 
 
@@ -678,9 +1749,12 @@ def find_nearest_idx_sorted(
 
 def getTimeIndices(dfs: list[pd.DataFrame], time: float | list[float]) -> list[int]:
     """Get the row index where df["Time"] is closest to desired time for every df in dfs"""
-    timeIndices = np.array(
-        [find_nearest_idx_sorted(df["Time"].to_numpy(), time) for df in dfs]
-    )
+    if isinstance(dfs, list) or isinstance(dfs, np.ndarray):
+        timeIndices = np.array(
+            [find_nearest_idx_sorted(df["Time"].to_numpy(), time) for df in dfs]
+        )
+    else:
+        timeIndices = np.array(find_nearest_idx_sorted(dfs["Time"].to_numpy(), time))
     return timeIndices
 
 
@@ -692,7 +1766,7 @@ def getTimeFromIndices(
         return np.array(
             [df["Time"].iloc[timeIndices[i, :]] for i, df in enumerate(dfs)]
         )
-    elif timeIndicies.ndim == 1:
+    elif timeIndices.ndim == 1:
         return np.array([df["Time"].iloc[timeIndices[i]] for i, df in enumerate(dfs)])
     else:
         raise NotImplementedError()
@@ -807,6 +1881,8 @@ def getAbundance(
     if on_grain:
         if only_surf:
             return df["#" + spec].iloc[timeIndex]
+        elif only_bulk:
+            return df["@" + spec].iloc[timeIndex]
         else:
             return df["#" + spec].iloc[timeIndex] + df["@" + spec].iloc[timeIndex]
     else:
@@ -983,7 +2059,7 @@ def physicalParamSetToString(physicalParams: list[float]) -> str:
 
 def physicalParamSetToSaveString(physicalParams: list[float]) -> str:
     """Convert a list of physical parameters to a nice string for human-readable, without symbols but with units"""
-    return f"{physicalParams[0]}K_{physicalParams[1]:.1e}cm-3_{physicalParams[2] * 1.3e-17}_{physicalParams[3]}Habing"
+    return f"{physicalParams[0]}K_{physicalParams[1]:.1e}cm-3_{physicalParams[2] * 1.3e-17}s-1_{physicalParams[3]}Habing"
 
 
 def physicalParamSetToIndex(
@@ -1011,18 +2087,22 @@ def getDataFramesForPhysicalParamSet(
     sampleDFs = readOutputFiles(samplesAtPhysicalParam, njobs=njobs, format=format)
     if format is None:
         format = nominalAtPhysicalParam.split(os.path.extsep)[-1]
-        print(f"Output file format of nominal df was detected to be: {format}")
     elif not isinstance(format, str):
         msg = f"Format should be a string (one of ['csv', 'h5', 'hdf5']) or None, but it was type {type(format)}"
         raise TypeError(msg)
+
     format = format.lower()
     if format not in ["csv", "h5", "hdf5"]:
         msg = f"format should be one of ['csv', 'h5', 'hdf5'], but it was {format}"
         raise ValueError(msg)
+
     if format == "csv":
         nominalDF = read_output_file(nominalAtPhysicalParam)
-    else:
+    elif format in ["h5", "hdf5"]:
         nominalDF = read_output_file_h5(nominalAtPhysicalParam)
+    else:
+        raise NotImplementedError(f"Format {format} not implemented")
+
     return sampleDFs, nominalDF
 
 
@@ -1055,6 +2135,7 @@ def calculateSignificantCorrelations2D(
     confidence_level: float = 0.95,
     minStatistic: float = 0.5,
     maxPvalue: float = 0.05,
+    calculate_confidence_interval: bool = True,
 ):
     correlations = calculateAllCorrelations2D(
         abundancesRIN,
@@ -1077,7 +2158,7 @@ def calculateSignificantCorrelations2D(
         abundancesRIN,
         parametersRIN[:, sigIndices],
         parameterNames[sigIndices],
-        calculateConfidenceInterval=True,
+        calculateConfidenceInterval=calculate_confidence_interval,
         confidence_level=0.95,
     )
     return correlations
@@ -1114,7 +2195,8 @@ def calculateAllCorrelations2D(
 
     if calculateConfidenceInterval:
         bootstrapmethod = stats.BootstrapMethod(
-            n_resamples=2000, batch=500, method="BCa"
+            n_resamples=2000,
+            method="BCa",
         )
         CIlow, CIhigh = res.confidence_interval(
             confidence_level=confidence_level, method=bootstrapmethod
@@ -1448,7 +2530,7 @@ def readOutputFiles(
 ) -> list[pd.DataFrame]:
     if format is None:
         format = filepaths[0].split(os.path.extsep)[-1]
-        print(f"Output file format was detected to be: {format}")
+
     elif not isinstance(format, str):
         msg = f"Format should be a string (one of ['csv', 'h5', 'hdf5']) or None, but it was type {type(format)}"
         raise TypeError(msg)

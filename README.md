@@ -1,13 +1,13 @@
 # A sensitivity analysis of interstellar ice chemistry in astrochemical models
 
-Tobias Dijkhuis, Thanja Lamberts, Serena Viti & Herma Cuppen
+**Tobias Dijkhuis[\*](#corresponding-authors), Thanja Lamberts[\*](#corresponding-authors), Serena Viti & Herma Cuppen**
 
 DOI: .........
 
-### Paper:
+### Paper
 You can find a PDF of the paper [here (todo)](00_paper/paper.pdf), or on the A&A website [here (todo)](https://google.com).
 
-### BibTex entry:
+### BibTex entry
 ```
 @article{Dijkhuis2025,
     title = {A sensitivity analysis of interstellar ice chemistry in astrochemical models},
@@ -16,7 +16,7 @@ You can find a PDF of the paper [here (todo)](00_paper/paper.pdf), or on the A&A
     doi = {},
     url = {},
     month = {},
-    journal = {Astronomy \& Astrophysics},
+    journal = {Astronomy \& Astrophysics}, % Replace by \aap if possible
     publisher = {EDP Sciences},
     volume = {},
     number = {},
@@ -25,15 +25,28 @@ You can find a PDF of the paper [here (todo)](00_paper/paper.pdf), or on the A&A
 }
 ```
 
-### Data generation
-All the data shown in the paper (and much more) can be generated using the scripts 
-in the [data generation directory](01_data_generation) First, install UCLCHEM.
+## Replicating results
+All the data shown in the paper (and much more) can be generated using the scripts provided in this repository.
+
+### Environment setup
+I would recommend creating a new python environment, to make sure that you have all of the required packages,
+and none of the packages conflict with the ones installed on your system before.
+
+The environment that was used for calculations and data analysis can be copied and activated by doing
+
+    conda env create -f environment.yml
+    conda activate sensitivity_analysis_ices
+
+Then, install UCLCHEM into this new environment
 
     cd model
     pip install -e .
 
+This will take some time, because UCLCHEM will be need to be compiled.
+
 > **Note:** This is a custom version of UCLCHEM, so you need to use the one provided in this repository.
 
+### Data generation
 The data can then be generated as such.
 
     cd 01_data_generation
@@ -41,13 +54,26 @@ The data can then be generated as such.
 
 ### Data analysis
 Once the data has been generated, it can be analyzed using tools in the [data analysis directory](02_data_analysis).
+In the [create_figures.py](02_data_analysis/create_figures.py) file, there is code to create all the figures
+shown in the paper. 
 
     cd 02_data_analysis
-    python3 analysis_abundances.py
+    python3 create_figures.py
+
+You can also use this code as inspiration for different analyses, like for different species.
 
 ### Figures
-All the created figures will be placed [here](03_figures).
+All the created figures will be placed in the [figures directory](03_figures).
+This already contains all figures used in the paper.
 
-### ORCID
- - Tobias Dijkhuis:
+## Corresponding authors
+ - Tobias Dijkhuis: <t.m.dijkhuis@lic.leidenuniv.nl>
+ - Thanja Lamberts: <a.l.m.lamberts@lic.leidenuniv.nl>
+
+## ORCID
+ - Tobias Dijkhuis: <https://orcid.org/0009-0009-2498-6429>
+ - Thanja Lamberts: <https://orcid.org/0000-0001-6705-2022>
+ - Serena Viti:     <https://orcid.org/0000-0001-8504-8844>
+ - Herma Cuppen:    <https://orcid.org/0000-0003-4397-0739>
+
 
