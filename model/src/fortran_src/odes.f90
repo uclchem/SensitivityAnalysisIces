@@ -10024,7 +10024,6 @@ ELSE
     ! In chemistry.f90: surfaceCoverage = 1/NUM_MONOLAYERS_IS_SURFACE * GAS_DUST_DENSITY_RATIO / NUM_SITES_PER_GRAIN
     surfaceCoverage = MIN(1.0D0, surfaceCoverage*safeMantle)/safeMantle
     YDOT(201)=YDOT(201)-YDOT(439)*surfaceCoverage*Y(201)
-    YDOT(202)=YDOT(202)-YDOT(439)*surfaceCoverage*Y(202)
     YDOT(203)=YDOT(203)-YDOT(439)*surfaceCoverage*Y(203)
     YDOT(204)=YDOT(204)-YDOT(439)*surfaceCoverage*Y(204)
     YDOT(205)=YDOT(205)-YDOT(439)*surfaceCoverage*Y(205)
@@ -10144,9 +10143,6 @@ ELSE
     REACTIONRATE(3785) = 0.0D0
     REACTIONRATE(3903) = -YDOT(439)*surfaceCoverage*Y(201)
     YDOT(319)=YDOT(319)+YDOT(439)*surfaceCoverage*Y(201)
-    REACTIONRATE(3786) = 0.0D0
-    REACTIONRATE(3904) = -YDOT(439)*surfaceCoverage*Y(202)
-    YDOT(320)=YDOT(320)+YDOT(439)*surfaceCoverage*Y(202)
     REACTIONRATE(3787) = 0.0D0
     REACTIONRATE(3905) = -YDOT(439)*surfaceCoverage*Y(203)
     YDOT(321)=YDOT(321)+YDOT(439)*surfaceCoverage*Y(203)

@@ -352,7 +352,9 @@ REAL(dp) FUNCTION getDesorptionFractionBare(reacIndx, LHDESindex) RESULT(desorpt
 
     REAL(dp) :: deltaEnthalpy,maxBindingEnergy,epsilonCd,productEnthalpy
     REAL(dp), PARAMETER :: EFFECTIVE_SURFACE_MASS = 120.0
-    REAL(dp) :: bindingEnergyDesorbingSpec
+    REAL(dp) :: bindingEnergyDesorbingSpec, chi
+    LOGICAL :: twoProductReaction
+    
 
     integer :: desorbingIndex, desorbingOnGrainIndex, LHDESindex, desorbingIceListIndex
 
@@ -367,9 +369,6 @@ REAL(dp) FUNCTION getDesorptionFractionBare(reacIndx, LHDESindex) RESULT(desorpt
          RETURN
      END IF
     
-    ! WRITE(*,*) "    Calculating bare desorption fraction"
-
-
     !Get indices of grain surface version of products products 
     productIndex=0
     !Arrays like binding energy and formation enthalpy are indexed by position in iceList
@@ -388,9 +387,6 @@ REAL(dp) FUNCTION getDesorptionFractionBare(reacIndx, LHDESindex) RESULT(desorpt
         IF (iceList(i) .eq. p3(reacIndx)) productIndex(3) = i
         IF (iceList(i) .eq. p4(reacIndx)) productIndex(4) = i
 
-        ! WRITE(*,*) "Gas ice list", gasiceList(i), p1(reacIndx)
-        ! WRITE(*,*) "Ice list", iceList(i), p1(reacIndx)
-
         IF (gasiceList(i) .eq. p1(reacIndx)) productIndex(1) = i
         IF (gasiceList(i) .eq. p2(reacIndx)) productIndex(2) = i
         IF (gasiceList(i) .eq. p3(reacIndx)) productIndex(3) = i
@@ -398,21 +394,23 @@ REAL(dp) FUNCTION getDesorptionFractionBare(reacIndx, LHDESindex) RESULT(desorpt
 
     END DO
 
-    ! WRITE(*,*) "    PRODUCT INDECES:", productIndex
-
     IF (p2(reacIndx) .eq. 9999) THEN
         ! Only one product, and so that one product is desorbing
         desorbingIndex = 1
         desorbingOnGrainIndex = p1(LHDEScorrespondingLHreacs(LHDESindex))
+        twoProductReaction = .False.
     ELSE IF (p1(LHDEScorrespondingLHreacs(LHDESindex)) .ne. p1(reacIndx)) THEN ! p1 is desorbing
         desorbingIndex = 1
         desorbingOnGrainIndex = p1(LHDEScorrespondingLHreacs(LHDESindex))
+        twoProductReaction = .True.
     ELSE IF (p2(LHDEScorrespondingLHreacs(LHDESindex)) .ne. p2(reacIndx)) THEN ! p2 is desorbing
         desorbingIndex = 2
         desorbingOnGrainIndex = p2(LHDEScorrespondingLHreacs(LHDESindex))
+        twoProductReaction = .True.
     ELSE IF (p3(LHDEScorrespondingLHreacs(LHDESindex)) .ne. p3(reacIndx)) THEN ! p3 is desorbing
         desorbingIndex = 3
         desorbingOnGrainIndex = p3(LHDEScorrespondingLHreacs(LHDESindex))
+        twoProductReaction = .True.
     ELSE
         WRITE(*,*) "COULD NOT DETERMINE DESORBING PRODUCT INDEX OF REACTION:"
         WRITE(*,*) specName(re1(reacIndx)), specName(re2(reacIndx)), "->", &
@@ -429,11 +427,7 @@ REAL(dp) FUNCTION getDesorptionFractionBare(reacIndx, LHDESindex) RESULT(desorpt
         STOP
     END IF
 
-
-
     ! Now we know which product desorbs, we just have to calculate bare desorption prob using Minissale et al 2016.
-
-    ! WRITE(*,*) "    Calculating reaction enthalpy"
 
     desorbingIceListIndex = 0
     productEnthalpy = 0.0D0
@@ -452,29 +446,6 @@ REAL(dp) FUNCTION getDesorptionFractionBare(reacIndx, LHDESindex) RESULT(desorpt
         END IF
     END DO
 
-    ! WRITE(*,*) "    DESORBING PRODUCT INDEX:", desorbingIndex
-    ! WRITE(*,*) "    DESORBING SPECIES INDEX:", desorbingOnGrainIndex
-    ! WRITE(*,*) "    DESORBING SPECIES NAME:", specname(desorbingOnGrainIndex)
-
-    IF (desorbingIceListIndex .eq. 0) THEN
-        WRITE(*,*) "COULD NOT DETERMINE ICE LIST INDEX OF PRODUCT ON GRAIN OF REACTION:"
-        WRITE(*,*) specName(re1(reacIndx)), specName(re2(reacIndx)), "->", &
-            specName(p1(reacIndx)), specName(p2(reacIndx)), specName(p3(reacIndx))
-        WRITE(*,*) "DESORBING PRODUCT INDEX:", desorbingIndex
-        WRITE(*,*) "DESORBING SPECIES INDEX:", desorbingOnGrainIndex
-        WRITE(*,*) "DESORBING SPECIES NAME:", specname(desorbingOnGrainIndex)
-        WRITE(*,*) "LHDES INDEX:", LHDESindex
-        WRITE(*,*) "REAC INDEX:", reacIndx
-        WRITE(*,*) "CORRESPONDING LH INDEX:", LHDEScorrespondingLHreacs(LHDESindex)
-        WRITE(*,*) "CORRESPONDING LH REACTION:"
-        WRITE(*,*) specName(re1(LHDEScorrespondingLHreacs(LHDESindex))), &
-            specName(re2(LHDEScorrespondingLHreacs(LHDESindex))), "->", &
-            specName(p1(LHDEScorrespondingLHreacs(LHDESindex))), &
-            specName(p2(LHDEScorrespondingLHreacs(LHDESindex))), &
-            specName(p3(LHDEScorrespondingLHreacs(LHDESindex)))
-        STOP
-    END IF
-
     deltaEnthalpy = productEnthalpy - (formationEnthalpy(reactIndex1) + formationEnthalpy(reactIndex2))
     ! If deltaEnthalpy > 0: endothermic
     ! If deltaEnthalpy < 0: exothermic, energy released to environment
@@ -491,51 +462,40 @@ REAL(dp) FUNCTION getDesorptionFractionBare(reacIndx, LHDESindex) RESULT(desorpt
     !Convert from kcal to J, from J to K and from moles-1 to reactions-1
     deltaEnthalpy = deltaEnthalpy*KCAL_TO_JOULE/(K_BOLTZ_SI*N_AVOGADRO)
 
-
-    ! WRITE(*,*) "    Desorbing product index:", desorbingOnGrainIndex
-    ! WRITE(*,*) "    Desorbing product mass:", mass(desorbingOnGrainIndex)
-    ! WRITE(*,*) "    Desorbing product ice list index:", desorbingIceListIndex
     bindingEnergyDesorbingSpec = bindingEnergy(desorbingIceListIndex)
-    ! WRITE(*,*) "    Desorbing product binding energy:", bindingEnergyDesorbingSpec
     IF (deltaEnthalpy .lt. bindingEnergyDesorbingSpec) THEN
-        ! WRITE(*,*) "    Returning value"
         desorptionFractionBare = 0.0d0
         RETURN
     END IF
 
-
     epsilonCd = mass(desorbingOnGrainIndex)
-    
     !epsilonCd is the fraction of kinetic energy kept my the product when it collides with grain surface
     epsilonCd = ((epsilonCd - EFFECTIVE_SURFACE_MASS) / (epsilonCd + EFFECTIVE_SURFACE_MASS))**2
 
+    IF (.NOT. twoProductReaction) THEN
+        chi = 1.0d0
+    ELSE
+        ! Distribute energy in case of two product reaction
+        ! chi_i = m_j/(m_i+m_j)
+        IF (desorbingIndex .eq. 1) THEN
+            chi = mass(p2(reacIndx)) / (mass(p1(reacIndx))+mass(p2(reacIndx)))
+        ELSE IF (desorbingIndex .eq. 2) THEN
+            chi = mass(p1(reacIndx)) / (mass(p1(reacIndx))+mass(p2(reacIndx)))
+        ELSE
+            WRITE(*,*) "MINISSALE 2016 METHOD FOR CHEMICAL DESORPTION IS NOT VALID FOR DESORBINDEX > 2"
+            STOP
+        END IF
+    END IF
+    
+    epsilonCd = epsilonCd * chi
+
+    IF (epsilonCd * deltaEnthalpy .lt. bindingEnergyDesorbingSpec) THEN
+        desorptionFractionBare = 0.0d0
+        RETURN
+    END IF
+
     degreesOfFreedom = 3 * atomCounts(desorbingOnGrainIndex)
-
     desorptionFractionBare = exp((-bindingEnergyDesorbingSpec*REAL(degreesOfFreedom)) / (epsilonCd * deltaEnthalpy))
-    ! WRITE(*,*) "    Returning value"
-
-    ! IF ((trim(specName(re1(reacIndx))) .eq. "#SO2") .and. (trim(specName(re2(reacIndx))) .eq. "#C") & 
-    !     .and. (trim(specName(p1(reacIndx))) .eq. "#SO")) THEN
-    !     WRITE(*,*) specName(re1(reacIndx)), specName(re2(reacIndx)), "->", &
-    !         specName(p1(reacIndx)), specName(p2(reacIndx)), specName(p3(reacIndx))
-    !     WRITE(*,*) "LHDES INDEX:", LHDESindex
-    !     WRITE(*,*) "REAC INDEX:", reacIndx
-    !     WRITE(*,*) "CORRESPONDING LH INDEX:", LHDEScorrespondingLHreacs(LHDESindex)
-    !     WRITE(*,*) "CORRESPONDING LH REACTION:"
-    !     WRITE(*,*) specName(re1(LHDEScorrespondingLHreacs(LHDESindex))), &
-    !         specName(re2(LHDEScorrespondingLHreacs(LHDESindex))), "->", &
-    !         specName(p1(LHDEScorrespondingLHreacs(LHDESindex))), &
-    !         specName(p2(LHDEScorrespondingLHreacs(LHDESindex))), &
-    !         specName(p3(LHDEScorrespondingLHreacs(LHDESindex)))
-    !     WRITE(*,*) "PRODUCT ENTHALPY", productEnthalpy
-    !     WRITE(*,*) "DELTA ENTHALPY", deltaEnthalpy
-    !     WRITE(*,*) "DESORBING MASS", mass(desorbingOnGrainIndex)
-    !     WRITE(*,*) "EPSILON CD", epsilonCd
-    !     WRITE(*,*) "DESGREES OF FREEDOM", degreesOfFreedom
-    !     WRITE(*,*) "BINDING ENERGY OF DESORBING PRODUCT", bindingEnergyDesorbingSpec
-    !     WRITE(*,*) "DESORPTION FRACTION BARE", desorptionFractionBare
-    !     STOP
-    ! END IF
 END FUNCTION getDesorptionFractionBare
 
 FUNCTION getDesorptionFractionFullCoverage(reacIndx, LHDESindex) RESULT (desorptionFractionFullCoverage)
@@ -571,15 +531,6 @@ FUNCTION getDesorptionFractionFullCoverage(reacIndx, LHDESindex) RESULT (desorpt
             &.or. (re1(reacIndx).eq.nh.and.re2(reacIndx).eq.ngoh)) desorptionFractionFullCoverage = 0.25D0
         RETURN
     ENDIF
-
-    ! Just for testing purposes.
-    desorptionFractionFullCoverage = desorptionFractionsBare(reacIndx)/10.0D0    !< See Minisalle et al. 2016 for icy grain surface.
-    ! Special case of OH+H, O+H, N+N on ices, see same paper
-    if (re1(reacIndx).eq.ngn.and.re2(reacIndx).eq.ngn) desorptionFractionFullCoverage = 0.5D0
-    if ((re1(reacIndx).eq.ngo.and.re2(reacIndx).eq.nh) &
-        &.or. (re1(reacIndx).eq. nh.and.re2(reacIndx).eq.ngo)) desorptionFractionFullCoverage = 0.3D0
-    if ((re1(reacIndx).eq.ngoh.and.re2(reacIndx).eq.nh) &
-        &.or. (re1(reacIndx).eq.nh.and.re2(reacIndx).eq.ngoh)) desorptionFractionFullCoverage = 0.25D0
 
     !Get indices of grain surface version of products products 
     productIndex=0

@@ -1,5 +1,11 @@
-# Ignore the "data" directory
-01_data_generation/data/
+# Ignore the contents of the "data" directory
+02_data/*
+# Still keep track of the directory itself
+!02_data/.gitkeep
+
+# Ignore object and module files
+model/src/fortran_src/*.o
+model/src/fortran_src/*.mod
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -217,3 +223,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+

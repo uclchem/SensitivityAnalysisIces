@@ -568,6 +568,7 @@ CONTAINS
             ! Fix to make sure that running in memory mode after running in file mode works correctly
             readAbunds=.False.
             writeAbunds=.False.
+            IF (rateOutput) CALL fileSetup
         ELSE
             CALL fileSetup
         END IF

@@ -5,7 +5,7 @@
 DOI: .........
 
 ### Paper
-You can find a PDF of the paper [here (todo)](00_paper/paper.pdf), or on the A&A website [here (todo)](https://google.com).
+You can find a PDF of the paper [here (todo)](00_paper/paper.pdf), or on arXiv [here (todo)](https://google.com).
 
 ### BibTex entry
 ```
@@ -40,30 +40,43 @@ The environment that was used for calculations and data analysis can be copied a
 Then, install UCLCHEM into this new environment
 
     cd model
-    pip install -e .
+    python3 -m pip install -e .
 
 This will take some time, because UCLCHEM will be need to be compiled.
 
 > **Note:** This is a custom version of UCLCHEM, so you need to use the one provided in this repository.
 
 ### Data generation
-The data can then be generated as such.
+The data for the standard cosmic ray ionization rate ($\zeta=1.3\times10^{-17}$ s$^{-1}$) and UV field strength 
+($F_{\mathrm{UV}}=1$ Habing) can be obtained from the [Zenodo repository](https://doi.org/10.5281/zenodo.17463693).
+After downloading this data and putting it in the [02_data](02_data) directory and extracting the contents you should be good to go.
+The contents can be extracted by doing (on Ubuntu at least, check for your specific operating system)
+
+    unzip data_sensitivity_analysis_ices.zip 
+
+This should result in two directories, `varying_all` and `varying_reactions`. The first varies all parameters,
+and the second varies only the reaction energy barriers, but with a wider distribution (used for Fig. D3 in the paper).
+
+If desired, the data for other values of the cosmic ray ionization rate and UV field strengths
+can be generated as such.
 
     cd 01_data_generation
     python3 run_sensitivity_analysis.py
 
+> **Note:** You need to specify the desired destination directory manually in `run_sensitivity_analysis.py`.
+
 ### Data analysis
-Once the data has been generated, it can be analyzed using tools in the [data analysis directory](02_data_analysis).
-In the [create_figures.py](02_data_analysis/create_figures.py) file, there is code to create all the figures
+Once the data has been generated, it can be analyzed using tools in the [data analysis directory](03_data_analysis).
+In [create_figures.py](03_data_analysis/create_figures.py), there is code to create all the figures
 shown in the paper. 
 
-    cd 02_data_analysis
+    cd 03_data_analysis
     python3 create_figures.py
 
 You can also use this code as inspiration for different analyses, like for different species.
 
 ### Figures
-All the created figures will be placed in the [figures directory](03_figures).
+All the created figures will be placed in the [figures directory](04_figures).
 This already contains all figures used in the paper.
 
 ## Corresponding authors

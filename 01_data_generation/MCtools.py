@@ -24,6 +24,7 @@ def generate_samples(
     n_samples: int,
     # means: list[float],
     output_path: str | Path | None = None,
+    only_reactions: bool = False,
 ) -> np.ndarray:
     (
         species,
@@ -37,17 +38,26 @@ def generate_samples(
 
     # Calculate desired standard deviations of normal distributions.
     standardDeviations = (
-        [value_to_std(Ebind, type="energy") for Ebind in binding_energies_surf]
-        + [value_to_std(Ediff, type="energy") for Ediff in diffusion_barriers_surf]
+        [
+            value_to_std(Ebind, type="energy", wide=only_reactions)
+            for Ebind in binding_energies_surf
+        ]
         + [
-            value_to_std(prefac, type="prefactor")
+            value_to_std(Ediff, type="energy", wide=only_reactions)
+            for Ediff in diffusion_barriers_surf
+        ]
+        + [
+            value_to_std(prefac, type="prefactor", wide=only_reactions)
             for prefac in diffusionprefactors_surf
         ]
         + [
-            value_to_std(prefac, type="prefactor")
+            value_to_std(prefac, type="prefactor", wide=only_reactions)
             for prefac in desorptionprefactors_surf
         ]
-        + [value_to_std(Ereac, type="energy") for Ereac in barriers_non_coupled]
+        + [
+            value_to_std(Ereac, type="energy", wide=only_reactions)
+            for Ereac in barriers_non_coupled
+        ]
     )
     standardDeviations = np.array(standardDeviations)
 
@@ -77,31 +87,48 @@ def generate_samples(
         10, normalSamples[:, firstPrefacIndex : lastPrefacIndex + 1]
     )
 
-    if output_path is not None:
-        columns_binding_energies = [f"{str(spec)} bind" for spec in species]
-        columns_diffusion_barriers = [f"{str(spec)} diff" for spec in species]
-        columns_diff_prefacs = [f"{str(spec)} diffprefac" for spec in species]
-        columns_des_prefacs = [f"{str(spec)} desprefac" for spec in species]
-        columns_energy_barriers = [str(reaction) for reaction in reactions]
-        columns_all = (
-            columns_binding_energies
-            + columns_diffusion_barriers
-            + columns_diff_prefacs
-            + columns_des_prefacs
-            + columns_energy_barriers
-        )
-        # Write the parameters
+    if output_path is None:
+        return normalSamples
+
+    columns_binding_energies = [f"{str(spec)} bind" for spec in species]
+    columns_diffusion_barriers = [f"{str(spec)} diff" for spec in species]
+    columns_diff_prefacs = [f"{str(spec)} diffprefac" for spec in species]
+    columns_des_prefacs = [f"{str(spec)} desprefac" for spec in species]
+    columns_energy_barriers = [str(reaction) for reaction in reactions]
+    columns_all = (
+        columns_binding_energies
+        + columns_diffusion_barriers
+        + columns_diff_prefacs
+        + columns_des_prefacs
+        + columns_energy_barriers
+    )
+    # Write the parameters
+    if not only_reactions:
         df = pd.DataFrame(normalSamples, columns=columns_all)
-        df.to_csv(output_path, sep=",")
+    else:
+        # If only_reactions, only write the reactions to the csv
+        reactionsStartIndex = (
+            len(columns_binding_energies)
+            + len(columns_diffusion_barriers)
+            + len(columns_diff_prefacs)
+            + len(columns_des_prefacs)
+        )
+        df = pd.DataFrame(
+            normalSamples[:, reactionsStartIndex:], columns=columns_energy_barriers
+        )
+    df.to_csv(output_path, sep=",")
     return normalSamples
 
 
-def value_to_std(value: float, type=Literal["energy", "prefactor"]) -> float:
+def value_to_std(
+    value: float, type: Literal["energy", "prefactor"], wide: bool = False
+) -> float:
     """Get the standard deviation to use for sampling different types of parameters
 
     Args:
         value (float): mean value of the parameter.
         type (str): whether the value is 'energy' or a 'prefactor'
+        wide (bool): whether to do more wide sampling, std at most 1280 K, otherwise std will be at most 800 K.
 
     Returns:
         std (float): standard deviation to use for sampling
@@ -109,12 +136,20 @@ def value_to_std(value: float, type=Literal["energy", "prefactor"]) -> float:
     if type == "prefactor":
         return 2.0
 
-    if value < 200:
-        std = 100.0
-    elif value < 1600:
-        std = float(value) / 2.0
+    if not wide:
+        if value < 200:
+            std = 100.0
+        elif value < 1600:
+            std = float(value) / 2.0
+        else:
+            std = 800.0
     else:
-        std = 800.0
+        if value < 200:
+            std = 100.0
+        elif value < 1600:
+            std = float(value) / 1.25
+        else:
+            std = 1280.0
     return std
 
 
@@ -447,9 +482,9 @@ def create_grid(
         model_table (pd.DataFrame): dataframe containing all the models
     """
     n_params = len(column_names)
-    assert len(params) == n_params, (
-        "Number of column names and input parameters not the same"
-    )
+    assert (
+        len(params) == n_params
+    ), "Number of column names and input parameters not the same"
     params = [remove_duplicates(param_lst) for param_lst in params]
     parameterSpace = np.asarray(np.meshgrid(*params)).reshape(n_params, -1)
     model_table = pd.DataFrame(parameterSpace.T, columns=column_names)
@@ -503,6 +538,7 @@ def run_grid(
     run_model_file: str,
     sample_nr: int | str,
     n_jobs: int,
+    force: bool = False,
 ) -> list[Popen]:
     """Run a grid of physical conditions, while keeping track of the number of running jobs.
 
@@ -526,7 +562,7 @@ def run_grid(
         )
         model_run_process = Popen(
             [
-                f"{sys.executable} {run_model_file} {row['outputFile']} {sample_nr} {row['temperature']} {row['density']} {row['zeta']} {row['radfield']}"
+                f"{sys.executable} {run_model_file} {row['outputFile']} {sample_nr} {row['temperature']} {row['density']} {row['zeta']} {row['radfield']} {int(force)}"
             ],
             shell=True,
             stdin=None,

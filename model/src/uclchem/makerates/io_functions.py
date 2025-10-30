@@ -644,14 +644,14 @@ def build_ode_string(
         i = len(reaction_list)
         j = len(reaction_list) + len(surf_species)
         for n, species in enumerate(species_list):
-            # if species.name in [
-            #     "#H2",
-            #     "@H2",
-            # ]:  # Do not allow H2 to transfer from surface to bulk
-            #     if species.name == "@H2":
-            #         i += 1
-            #         j += 1
-            #     continue
+            if species.name in [
+                "#H2",
+                "@H2",
+            ]:  # Do not allow H2 to transfer from surface to bulk
+                if species.name == "@H2":
+                    i += 1
+                    j += 1
+                continue
             if species.name[0] == "@":
                 i += 1
                 j += 1
