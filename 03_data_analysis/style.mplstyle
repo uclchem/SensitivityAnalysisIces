@@ -1,0 +1,54 @@
+# Matplotlib style for scientific plotting
+# This is the base style for "SciencePlots"
+# see: https://github.com/garrettj403/SciencePlots
+
+# Set x axis
+xtick.direction : in
+xtick.major.size : 3
+xtick.major.width : 0.5
+xtick.minor.size : 1.5
+xtick.minor.width : 0.5
+xtick.minor.visible : True
+xtick.top : True
+
+# Set y axis
+ytick.direction : in
+ytick.major.size : 3
+ytick.major.width : 0.5
+ytick.minor.size : 1.5
+ytick.minor.width : 0.5
+ytick.minor.visible : True
+ytick.right : True
+
+# Set line widths
+axes.linewidth : 0.5
+grid.linewidth : 0.5
+lines.linewidth : 1.5
+
+# Remove legend frame
+legend.frameon : False
+legend.labelspacing : 0.3
+legend.borderpad : 0.3
+legend.borderaxespad : 0.4
+
+# Always save as 'tight'
+savefig.bbox : tight
+savefig.transparent: True
+
+errorbar.capsize: 4
+
+
+# Set A&A font and figsize
+figure.figsize : 3.46456693, 2.598425197
+
+text.latex.preamble : \usepackage[varg]{txfonts}
+text.usetex : True
+font.family : serif
+font.size : 9.0
+
+savefig.pad_inches : 0.01
+
+# Color bright from Paul Tol's colorschemes
+#axes.prop_cycle : cycler('color', ['4477AA', 'EE6677', '228833', 'CCBB44', '66CCEE', 'AA3377', 'BBBBBB'])
+# Color muted from Paul Tol's colorschemes
+axes.prop_cycle : cycler('color', ['CC6677', '332288', 'DDCC77', '117733', '88CCEE', '882255', '44AA99', '999933', 'AA4499', 'DDDDDD', '000000'])

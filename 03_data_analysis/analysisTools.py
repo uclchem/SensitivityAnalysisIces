@@ -22,15 +22,20 @@ from IPython.display import display
 from matplotlib import ticker
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.lines import Line2D
+
 # from labellines import labelLine, labelLines
 from scipy import integrate, ndimage, stats
 from scipy.constants import atomic_mass, h, hbar, k, pi
+
 # from uclchem.analysis import (_format_reactions,rates_change,
 #                               _param_dict_from_output, analysis,
 #                               analysis_solid_phase, getNetChange,
 #                               read_analysis, read_output_file)
-from uclchem.analysis import (_format_reactions, _param_dict_from_output,
-                              read_output_file)
+from uclchem.analysis import (
+    _format_reactions,
+    _param_dict_from_output,
+    read_output_file,
+)
 from uclchem.constants import n_species
 from uclchem.makerates.reaction import Reaction
 from uclchem.uclchemwrap import uclchemwrap as wrap
@@ -99,7 +104,7 @@ def set_rc_params(font: str = "AA") -> None:
     if font not in ["aa", "cmu_bright"]:
         raise ValueError()
 
-    plt.style.use("style.mplstyle")
+    plt.style.use(Path("style.mplstyle"))
 
     if font == "cmu_bright":
         mpl.rcParams["font.family"] = "sans-serif"
@@ -131,7 +136,7 @@ class DataManager:
         """
         self.directory = Path(directory)
         if not self.directory.is_dir():
-            raise ValueError()
+            raise FileNotFoundError(f"{self.directory} is not a valid directory")
         self.parameters_path = self.directory / "MC_parameter_runs.csv"
 
         parametersDF = pd.read_csv(self.parameters_path, index_col=0)
