@@ -620,8 +620,8 @@ class DataManager:
         ]
 
         temp_colors = sns.color_palette("flare_r", as_cmap=True)
-        temp_colors = sns.color_palette("rocket", as_cmap=True)
-        temp_colors.colors = temp_colors.colors[50:175]
+        # temp_colors = sns.color_palette("rocket", as_cmap=True)
+        # temp_colors.colors = temp_colors.colors[50:175]
         norm = mpl.colors.BoundaryNorm(color_bounds, temp_colors.N)
         sm = plt.cm.ScalarMappable(norm=norm, cmap=temp_colors)
 
@@ -654,7 +654,7 @@ class DataManager:
                 axs[i].plot(
                     times,
                     averageWidthOverDensities,
-                    c=temp_colors(k * 1.0 / len(temps)),
+                    c=temp_colors(k * 1.0 / (len(temps)-1)),
                     zorder=2,
                 )
 
