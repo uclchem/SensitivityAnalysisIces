@@ -79,6 +79,14 @@ You can also use this code as inspiration for different analyses, like for diffe
 All the created figures will be placed in the [figures directory](04_figures).
 This already contains all figures used in the paper.
 
+Additional figures, not shown in the paper, can be created by doing 
+
+    cd 03_data_analysis
+    python3 create_additional_figures.py
+
+This creates a bunch of additional figures, similar to [Figure 2](04_figures/fig2.pdf) but for
+different physical conditions. They are shown in the directory [05_additional_figures](05_additional_figures).
+
 ## Corresponding authors
  - Tobias Dijkhuis: <t.m.dijkhuis@lic.leidenuniv.nl>
  - Thanja Lamberts: <a.l.m.lamberts@lic.leidenuniv.nl>
