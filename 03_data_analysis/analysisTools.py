@@ -522,6 +522,8 @@ class DataManager:
         postfix=".pdf",
         filter_zeta: list[float] | float | None = None,
         filter_radfield: list[float] | float | None = None,
+        plot_individual_samples: bool = True,
+        put_legend_on_side: bool = False,
     ) -> None:
         mpl.use("agg")
         for physical_condition in self.physical_conditions:
@@ -548,6 +550,8 @@ class DataManager:
                 times=times,
                 on_grain=on_grain,
                 save_fig_path=path,
+                plot_individual_samples=plot_individual_samples,
+                put_legend_on_side=put_legend_on_side,
             )
             plt.close()
 
@@ -654,7 +658,7 @@ class DataManager:
                 axs[i].plot(
                     times,
                     averageWidthOverDensities,
-                    c=temp_colors(k * 1.0 / (len(temps)-1)),
+                    c=temp_colors(k * 1.0 / (len(temps) - 1)),
                     zorder=2,
                 )
 
