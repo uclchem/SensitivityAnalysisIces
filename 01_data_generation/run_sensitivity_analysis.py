@@ -4,14 +4,13 @@ from multiprocessing import cpu_count
 from pathlib import Path
 
 import numpy as np
-from uclchem.makerates import io_functions
-from uclchem.makerates.makerates import _get_network_from_files
-
 from MCtools_updated import (combine_grids, create_grid,
                              extract_parameters_from_network, generate_samples,
                              get_UCLCHEM_dir, readMCparameters,
                              recompile_UCLCHEM, run_grid,
                              terminate_all_processes)
+from uclchem.makerates import io_functions
+from uclchem.makerates.makerates import _get_network_from_files
 
 if __name__ == "__main__":
     response = input(
@@ -67,21 +66,25 @@ if __name__ == "__main__":
         only_reactions = True
         print("Varying only reactions, with a wider standard deviation")
 
+    # Directory of this file
+    working_dir = Path(os.path.dirname(__file__))
+
+    data_dir = working_dir / "../02_data"
+
     if not do_convergence:
         # Number of samples to generate and run
         n_samples = 1000
         # Where to do the calculations and put the output data
-        output_dir = Path(
-            "/data2/dijkhuis/ChemSamplingMC/setWidthProductionTightCorrectChemdesDistributionOnlyReactions"
-        )
+        if not only_reactions:
+            output_dir = data_dir / "varying_all"
+        else:
+            output_dir = data_dir / "varying_reactions"
 
         # Grid of physical conditions (excluding zeta=100)
         temperatures = [10.0, 20.0, 30.0, 40.0, 50.0]
         densities = [1e3, 1e4, 1e5, 1e6]
-        # zetas = [0.1, 1.0, 10.0]
-        # radfields = [0.1, 1.0, 10.0]
-        zetas = [1.0]
-        radfields = [1.0]
+        zetas = [0.1, 1.0, 10.0]
+        radfields = [0.1, 1.0, 10.0]
 
         # Create the grid (excluding zeta=100)
         grid_table_a = create_grid(
@@ -93,28 +96,30 @@ if __name__ == "__main__":
             grid_folder=output_dir,
         )
 
-        # # Grid of physical conditions (zeta=100)
-        # densities_high_zeta = [1e3, 1e4, 1e5]
-        # high_zeta = [100.0]
+        # Grid of physical conditions (zeta=100)
+        densities_high_zeta = [1e3, 1e4, 1e5]
+        high_zeta = [100.0]
 
-        # # Create the grid (zeta=100)
-        # grid_table_b = create_grid(
-        #     ["temperature", "density", "zeta", "radfield"],
-        #     temperatures,
-        #     densities_high_zeta,
-        #     high_zeta,
-        #     radfields,
-        #     grid_folder=output_dir,
-        # )
+        # Create the grid (zeta=100)
+        grid_table_b = create_grid(
+            ["temperature", "density", "zeta", "radfield"],
+            temperatures,
+            densities_high_zeta,
+            high_zeta,
+            radfields,
+            grid_folder=output_dir,
+        )
 
         # # Create the overall grid
-        # grid_table = combine_grids([grid_table_a, grid_table_b])
-        grid_table = grid_table_a
+        grid_table = combine_grids([grid_table_a, grid_table_b])
     else:
         # Number of samples to test convergence
         n_samples = 2000
         # Where to do the convergence calculations and put the output data
-        output_dir = Path("data_convergence")
+        if not only_reactions:
+            output_dir = data_dir / "varying_all_convergence"
+        else:
+            output_dir = data_dir / "varying_reactions_convergence"
 
         temperatures = [10.0, 50.0]
         densities = [1e3, 1e6]
@@ -130,16 +135,14 @@ if __name__ == "__main__":
             grid_folder=output_dir,
         )
 
-    # Directory of this file
-    working_dir = Path(os.path.dirname(__file__))
-
     # Directory of the file used to run the model
-    run_model_file = working_dir / "run_model_updated.py"
+    run_model_file = working_dir / "run_model.py"
 
     if not output_dir.is_dir():
         # Make output directory if it does not exist
         print(f"Making directory {output_dir}")
         output_dir.mkdir()
+    print(f"Running calculations in directory {output_dir}")
 
     # UCLCHEM directory
     uclchem_dir = get_UCLCHEM_dir()
@@ -148,13 +151,13 @@ if __name__ == "__main__":
     makerates_dir = uclchem_dir / "Makerates"
 
     # Load the nominal network
-    network_dir = Path("/home/dijkhuis/PhD/Networks/2025-Dijkhuis-ClassicalBarrier")
-    species_file = network_dir / "default_species_inertia.csv"
+    network_dir = working_dir / "../network"
+    species_file = network_dir / "species.csv"
     network, dropped_reactions = _get_network_from_files(
         species_file,
         [
             makerates_dir / "data/databases/umist22.csv",
-            network_dir / "default_grain_network.csv",
+            network_dir / "grain_network.csv",
         ],
         ["UMIST", "UCL"],
         three_phase=True,
@@ -200,7 +203,6 @@ if __name__ == "__main__":
             diffusionBarriers = np.zeros_like(bindingEnergies)
             desorptionPrefactors = np.zeros_like(bindingEnergies)
             diffusionPrefactors = np.zeros_like(bindingEnergies)
-            # raise ValueError()
         samples = np.concatenate(
             [
                 bindingEnergies,
@@ -228,25 +230,23 @@ if __name__ == "__main__":
 
     # Recompile UCLCHEM
     print("Recompiling UCLCHEM")
-    # recompile_UCLCHEM(uclchem_dir=uclchem_dir, quiet=True)
+    recompile_UCLCHEM(uclchem_dir=uclchem_dir, quiet=True)
 
     # List to keep track of the running processes
     processes = []
 
     try:
         # Run grid using the nominal model
-        # processes = run_grid(
-        #     grid_table,
-        #     processes,
-        #     run_model_file,
-        #     "nominal",
-        #     n_jobs,
-        #     force=generate_new_samples,  # If new samples are generated, also force rerunning of models.
-        # )
+        processes = run_grid(
+            grid_table,
+            processes,
+            run_model_file,
+            "nominal",
+            n_jobs,
+            force=generate_new_samples,  # If new samples are generated, also force rerunning of models.
+        )
 
         for i in range(n_samples):
-            if i != 773:
-                continue
             # Change the corresponding binding energies and barriers in the network to the current runs values.
             if not only_reactions:
                 for j, specie in enumerate(species_surf):
