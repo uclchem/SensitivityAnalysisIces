@@ -47,12 +47,16 @@ This will take some time, because UCLCHEM will be need to be compiled.
 > **Note:** This is a custom version of UCLCHEM, so you need to use the one provided in this repository.
 
 ### Data generation
-The data for the standard cosmic ray ionization rate ($\zeta=1.3\times10^{-17}$ s$^{-1}$) and UV field strength 
+The data for the standard cosmic ray ionization rate ($\zeta=1.3\times10^{-17}$ $\text{s}^{-1}$) and UV field strength 
 ($F_{\mathrm{UV}}=1$ Habing) can be obtained from the [Zenodo repository](https://doi.org/10.5281/zenodo.17463693).
 After downloading this data and putting it in the [02_data](02_data) directory and extracting the contents you should be good to go.
 The contents can be extracted by doing (on Ubuntu at least, check for your specific operating system)
 
-    unzip data_sensitivity_analysis_ices.zip 
+    unzip varying_all.zip 
+
+or
+
+    unzip varying_reactions.zip
 
 This should result in two directories, `varying_all` and `varying_reactions`. The first varies all parameters,
 and the second varies only the reaction energy barriers, but with a wider distribution (used for Fig. D3 in the paper).
