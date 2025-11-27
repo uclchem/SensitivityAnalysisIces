@@ -100,5 +100,3 @@ different physical conditions. They are shown in the directory [05_additional_fi
  - Thanja Lamberts: <https://orcid.org/0000-0001-6705-2022>
  - Serena Viti:     <https://orcid.org/0000-0001-8504-8844>
  - Herma Cuppen:    <https://orcid.org/0000-0003-4397-0739>
-
-

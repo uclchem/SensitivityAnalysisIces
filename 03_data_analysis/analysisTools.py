@@ -22,20 +22,15 @@ from IPython.display import display
 from matplotlib import ticker
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.lines import Line2D
-
 # from labellines import labelLine, labelLines
 from scipy import integrate, ndimage, stats
 from scipy.constants import atomic_mass, h, hbar, k, pi
-
 # from uclchem.analysis import (_format_reactions,rates_change,
 #                               _param_dict_from_output, analysis,
 #                               analysis_solid_phase, getNetChange,
 #                               read_analysis, read_output_file)
-from uclchem.analysis import (
-    _format_reactions,
-    _param_dict_from_output,
-    read_output_file,
-)
+from uclchem.analysis import (_format_reactions, _param_dict_from_output,
+                              read_output_file)
 from uclchem.constants import n_species
 from uclchem.makerates.reaction import Reaction
 from uclchem.uclchemwrap import uclchemwrap as wrap
@@ -622,6 +617,7 @@ class DataManager:
         color_bounds = [temp - 0.5 * temp_diff for temp in temps] + [
             temps[-1] + 0.5 * temp_diff
         ]
+        ls = ["solid", "dashed", "dotted", "dashdot", (0, (5, 1))]
 
         temp_colors = sns.color_palette("flare_r", as_cmap=True)
         # temp_colors = sns.color_palette("rocket", as_cmap=True)
@@ -660,6 +656,7 @@ class DataManager:
                     averageWidthOverDensities,
                     c=temp_colors(k * 1.0 / (len(temps) - 1)),
                     zorder=2,
+                    ls=ls[k],
                 )
 
         for i, spec in enumerate(species):
